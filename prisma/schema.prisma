@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeline UserTimeline[]
+}
+
+model UserTimeline {
+  id        String   @id @default(uuid())
+  action    String
+  userId    String
+  editedBy  String // Nome ou ID de quem fez a ação
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Station {
+  id            String      @id @default(uuid())
+  name          String
+  line          String
+  type          StationType
+  address       String
+  openingHours  String
+  accessibility String[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  churches      Location[]
+}
+
+model Location {
+  id              Int      @id @default(autoincrement())
+  name            String
+  address         String
+  distance        String
+  stationId       String
+  officialWorship String[]
+  youthMeeting    String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+}
+
+enum StationType {
+  METRO
+  CPTM
+  VIA_QUATRO
+  VIA_MOBILIDADE
+  MONOTRILHO
+}
