@@ -405,6 +405,6 @@ Encontrou um bug? [Abra uma issue](https://github.com/IsmaelVeras/metroccb-api/i
 ## 👨‍💻 Autor
 
 **Ismael Veras**
-- GitHub: [@IsmaelVeras](https://github.com/seu-usuario)
+- GitHub: [@IsmaelVeras](https://github.com/IsmaelVeras)
 - LinkedIn: [Ismael Veras](https://www.linkedin.com/in/ismaelveras/)
 - Email: ismaelverass@hotmail.com
