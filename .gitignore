@@ -1,60 +1,6 @@
-# Dependências
-node_modules/
-vendor/
-
-# Ambientes
+node_modules
+# Keep environment variables out of version control
 .env
-.env.*.local
-.env.local
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Build / Dist
-dist/
-build/
-.out/
-.next/
-*.tsbuildinfo
-
-# Cache
-.cache/
-.vite/
-tmp/
-temp/
-*.log
-
-# IDEs / editores
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sistema Operacional
-.DS_Store
-Thumbs.db
-
-# Arquivos pessoais
-*.local
-*.bak
-*.old
-*.orig
-
-# Outros
-coverage/
-test-output/
-*.tgz
-*.zip
-*.rar
-*.7z
-*.gz
-
-# Git
-*.orig
-*.rej
-# Prisma
-prisma/
-lib/
+/src/lib/generated/prisma
+/prisma/migrations
