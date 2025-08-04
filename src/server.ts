@@ -5,12 +5,12 @@ import rateLimit from 'express-rate-limit';
 import routes from './routes';
 
 const app = express();
-const PORT = process.env.PORT || 3333;
+const port = process.env.PORT || 4000 
 
 // Middlewares de segurança
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3333',
+  origin: process.env.FRONTEND_URL || 'https://metroccb-api.onrender.com/api',
   credentials: true
 }));
 
@@ -66,8 +66,8 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API base URL: http://localhost:${PORT}/api`);
+app.listen(port, () => {
+  console.log(`🚀 Servidor rodando na porta ${port}`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
+  console.log(`📚 API base URL: http://localhost:${port}/api`);
 });
