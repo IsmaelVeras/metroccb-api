@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { StationType } from '../lib/generated/prisma';
+import { StationType } from '../../prisma/generated/prisma';
 
 const createStationSchema = z.object({
   name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
