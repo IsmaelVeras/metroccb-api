@@ -104,14 +104,14 @@ Crie um arquivo `.env` baseado no `.env.example`:
 DATABASE_URL="postgresql://usuario:senha@localhost:5432/nome_do_banco"
 
 # JWT Secret (use um valor seguro em produção)
-JWT_SECRET="seu-jwt-secret-super-seguro-aqui"
+JWT_SECRET="seu-jwt-secret-aqui"
 
 # Server
-PORT=3333
+PORT=3000
 NODE_ENV=development
 
 # Frontend URL (para CORS)
-FRONTEND_URL="http://localhost:3333"
+FRONTEND_URL="http://localhost:3000"
 ```
 
 ### Schema do Banco de Dados
@@ -184,7 +184,6 @@ POST /api/auth/login
 ### Base URL
 ```
 Local: http://localhost:3000/api
-Produção: https://sua-api.herokuapp.com/api
 ```
 
 ### 🔒 Autenticação
