@@ -10,7 +10,7 @@ const port = process.env.PORT || 4000
 // Middlewares de segurança
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://metroccb-api.onrender.com/api',
+  origin: ['process.env.FRONTEND_URL', 'https://metroccb-api.onrender.com/api'],
   credentials: true
 }));
 
