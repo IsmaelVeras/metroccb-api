@@ -2,8 +2,8 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { prisma } from '../lib/prisma';
 
 const createUserSchema = z.object({
   name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
@@ -24,6 +24,7 @@ const updateUserSchema = z.object({
 });
 
 export class UserController {
+  // Creates a new user
   static async create(req: Request, res: Response) {
     try {
       const validatedData = createUserSchema.parse(req.body);
@@ -71,6 +72,7 @@ export class UserController {
     }
   }
 
+  // User login
   static async login(req: Request, res: Response) {
     try {
       const validatedData = loginSchema.parse(req.body);
@@ -121,6 +123,7 @@ export class UserController {
     }
   }
 
+  // Gets all users
   static async getAll(req: Request, res: Response) {
     try {
       const users = await prisma.user.findMany({
@@ -141,6 +144,7 @@ export class UserController {
     }
   }
 
+  // Gets a user by ID
   static async getById(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -171,6 +175,7 @@ export class UserController {
     }
   }
 
+    // Updates a user by ID
   static async update(req: AuthRequest, res: Response) {
     try {
       const { id } = req.params;
@@ -228,6 +233,7 @@ export class UserController {
     }
   }
 
+  // Deletes a user by ID
   static async delete(req: AuthRequest, res: Response) {
     try {
       const { id } = req.params;
