@@ -2,7 +2,7 @@ import { Router } from "express"
 import { UserController } from "../controllers/userController"
 import { StationController } from "../controllers/stationController"
 import { LocationController } from "../controllers/locationController"
-import { authenticateToken } from "../middleware/auth"
+import { authenticateToken, type AuthRequest } from "../middleware/auth"
 
 const router = Router()
 
@@ -11,7 +11,9 @@ router.post("/auth/register", UserController.create)
 router.post("/auth/login", UserController.login)
 
 // Routes de usuários
-router.get("/me", authenticateToken, UserController.getProfile)
+router.get("/me", authenticateToken, (req: AuthRequest, res) => {
+  return UserController.getProfile(req, res)
+})
 router.get("/users", authenticateToken, UserController.getAll)
 router.get("/users/:id", authenticateToken, UserController.getById)
 router.put("/users/:id", authenticateToken, UserController.update)
