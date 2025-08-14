@@ -146,14 +146,14 @@ export class UserController {
   // get my profile
   static async getProfile(req: Request, res: Response) {
     try {
-      const userId = (req as any).userId
+      const user = (req as any).user
 
-      if (!userId) {
+      if (!user?.id) {
         return res.status(401).json({ error: "Usuário não autenticado" })
       }
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
+      const foundUser = await prisma.user.findUnique({
+        where: { id: user.id },
         select: {
           id: true,
           name: true,
@@ -168,11 +168,11 @@ export class UserController {
         },
       })
 
-      if (!user) {
+      if (!foundUser) {
         return res.status(404).json({ error: "Usuário não encontrado" })
       }
 
-      return res.json(user)
+      return res.json(foundUser)
     } catch (error) {
       console.error(error)
       return res.status(500).json({ error: "Erro interno do servidor" })
