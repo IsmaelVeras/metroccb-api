@@ -72,6 +72,7 @@ export class UserController {
     }
   }
 
+  // login
   static async login(req: Request, res: Response) {
     try {
       const validatedData = loginSchema.parse(req.body)
@@ -139,6 +140,42 @@ export class UserController {
         return res.status(400).json({ error: error.errors })
       }
       res.status(500).json({ error: "Erro interno do servidor" })
+    }
+  }
+
+  // get my profile
+  static async getProfile(req: Request, res: Response) {
+    try {
+      const userId = (req as any).userId
+
+      if (!userId) {
+        return res.status(401).json({ error: "Usuário não autenticado" })
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          email: true,
+          createdAt: true,
+          updatedAt: true,
+          timeline: {
+            orderBy: { createdAt: "desc" },
+            take: 10,
+          },
+        },
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: "Usuário não encontrado" })
+      }
+
+      return res.json(user)
+    } catch (error) {
+      console.error(error)
+      return res.status(500).json({ error: "Erro interno do servidor" })
     }
   }
 
