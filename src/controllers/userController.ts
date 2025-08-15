@@ -5,75 +5,231 @@ import { z } from "zod"
 import { AuthRequest } from "../middleware/auth"
 import { prisma } from "../lib/prisma"
 
+// Schemas de validação
 const createUserSchema = z.object({
-  name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
-  address: z.string().min(5, "Endereço deve ter pelo menos 5 caracteres"),
-  email: z.string().email("Email inválido"),
-  password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres"),
+  name: z
+    .string()
+    .min(2, "Nome deve ter pelo menos 2 caracteres")
+    .max(100, "Nome deve ter no máximo 100 caracteres")
+    .trim(),
+  address: z
+    .string()
+    .min(5, "Endereço deve ter pelo menos 5 caracteres")
+    .max(255, "Endereço deve ter no máximo 255 caracteres")
+    .trim(),
+  email: z.string().email("Email inválido").toLowerCase().trim(),
+  password: z
+    .string()
+    .min(8, "Senha deve ter pelo menos 8 caracteres")
+    .max(100, "Senha deve ter no máximo 100 caracteres")
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+      "Senha deve conter pelo menos uma letra minúscula, uma maiúscula e um número"
+    ),
 })
 
 const loginSchema = z.object({
-  email: z.string().email("Email inválido"),
+  email: z.string().email("Email inválido").toLowerCase().trim(),
   password: z.string().min(1, "Senha é obrigatória"),
 })
 
 const updateUserSchema = z.object({
-  name: z.string().min(2).optional(),
-  address: z.string().min(5).optional(),
-  email: z.string().email().optional(),
+  name: z
+    .string()
+    .min(2, "Nome deve ter pelo menos 2 caracteres")
+    .max(100, "Nome deve ter no máximo 100 caracteres")
+    .trim()
+    .optional(),
+  address: z
+    .string()
+    .min(5, "Endereço deve ter pelo menos 5 caracteres")
+    .max(255, "Endereço deve ter no máximo 255 caracteres")
+    .trim()
+    .optional(),
+  email: z.string().email("Email inválido").toLowerCase().trim().optional(),
 })
 
+const timelineQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(50).default(10),
+})
+
+// Constantes
+const JWT_EXPIRATION = "24h"
+const BCRYPT_ROUNDS = 12
+const COOKIE_MAX_AGE = 24 * 60 * 60 * 1000 // 24 horas
+
+// Tipos de resposta
+interface ApiResponse<T = any> {
+  success: boolean
+  data?: T
+  message?: string
+  error?: string | any[]
+}
+
+interface PaginatedResponse<T> {
+  data: T[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    pages: number
+    hasNext: boolean
+    hasPrev: boolean
+  }
+}
+
 export class UserController {
+  // Utility method para criar timeline
+  private static async createTimelineEntry(
+    action: string,
+    userId: string,
+    editedBy: string
+  ): Promise<void> {
+    try {
+      await prisma.userTimeline.create({
+        data: {
+          action,
+          userId,
+          editedBy,
+        },
+      })
+    } catch (error) {
+      console.error("Erro ao criar entrada no timeline:", error)
+    }
+  }
+
+  // Utility method para gerar token JWT
+  private static generateToken(userId: string, email: string): string {
+    const secret = process.env.JWT_SECRET
+    if (!secret) {
+      throw new Error("JWT_SECRET não configurado")
+    }
+
+    return jwt.sign({ userId, email }, secret, { expiresIn: JWT_EXPIRATION })
+  }
+
+  // Utility method para configurar cookie
+  private static setCookie(res: Response, token: string): void {
+    const isProduction = process.env.NODE_ENV === "production"
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "strict" : "lax",
+      maxAge: COOKIE_MAX_AGE,
+      path: "/",
+    })
+  }
+
+  // Utility method para resposta padronizada
+  private static sendResponse<T>(
+    res: Response,
+    status: number,
+    success: boolean,
+    data?: T,
+    message?: string,
+    error?: string | any[]
+  ): Response {
+    const response: ApiResponse<T> = { success }
+
+    if (data !== undefined) response.data = data
+    if (message) response.message = message
+    if (error) response.error = error
+
+    return res.status(status).json(response)
+  }
+
   // Creates a new user
-  static async create(req: Request, res: Response) {
+  static async create(req: Request, res: Response): Promise<Response> {
     try {
       const validatedData = createUserSchema.parse(req.body)
 
+      // Verificar se email já existe
       const existingUser = await prisma.user.findUnique({
         where: { email: validatedData.email },
       })
 
       if (existingUser) {
-        return res.status(400).json({ error: "Email já está em uso" })
+        return UserController.sendResponse(
+          res,
+          409,
+          false,
+          undefined,
+          undefined,
+          "Email já está em uso"
+        )
       }
 
-      const hashedPassword = await bcrypt.hash(validatedData.password, 10)
+      // Hash da senha
+      const hashedPassword = await bcrypt.hash(
+        validatedData.password,
+        BCRYPT_ROUNDS
+      )
 
-      const user = await prisma.user.create({
-        data: {
-          ...validatedData,
-          password: hashedPassword,
-        },
-        select: {
-          id: true,
-          name: true,
-          address: true,
-          email: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      // Criar usuário em transação
+      const result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            ...validatedData,
+            password: hashedPassword,
+          },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            email: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        })
+
+        // Criar entrada no timeline
+        await tx.userTimeline.create({
+          data: {
+            action: "Usuário criado",
+            userId: user.id,
+            editedBy: user.name,
+          },
+        })
+
+        return user
       })
 
-      // Criar registro no timeline
-      await prisma.userTimeline.create({
-        data: {
-          action: "Usuário criado",
-          userId: user.id,
-          editedBy: user.name,
-        },
-      })
-
-      res.status(201).json(user)
+      return UserController.sendResponse(
+        res,
+        201,
+        true,
+        result,
+        "Usuário criado com sucesso"
+      )
     } catch (error) {
+      console.error("Erro ao criar usuário:", error)
+
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors })
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          error.errors
+        )
       }
-      res.status(500).json({ error: "Erro interno do servidor" })
+
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
-  // login
-  static async login(req: Request, res: Response) {
+  // User login
+  static async login(req: Request, res: Response): Promise<Response> {
     try {
       const validatedData = loginSchema.parse(req.body)
 
@@ -82,7 +238,14 @@ export class UserController {
       })
 
       if (!user) {
-        return res.status(401).json({ error: "Credenciais inválidas" })
+        return UserController.sendResponse(
+          res,
+          401,
+          false,
+          undefined,
+          undefined,
+          "Credenciais inválidas"
+        )
       }
 
       const isPasswordValid = await bcrypt.compare(
@@ -91,69 +254,110 @@ export class UserController {
       )
 
       if (!isPasswordValid) {
-        return res.status(401).json({ error: "Credenciais inválidas" })
+        return UserController.sendResponse(
+          res,
+          401,
+          false,
+          undefined,
+          undefined,
+          "Credenciais inválidas"
+        )
       }
 
-      const token = jwt.sign(
-        {
-          userId: user.id,
-          email: user.email,
-        },
-        process.env.JWT_SECRET || "fallback-secret",
-        { expiresIn: "24h" }
+      // Gerar token e configurar cookie
+      const token = UserController.generateToken(user.id, user.email)
+      UserController.setCookie(res, token)
+
+      // Registrar login no timeline (não aguardar para não atrasar resposta)
+      UserController.createTimelineEntry("Login realizado", user.id, user.name)
+
+      const userData = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        address: user.address,
+      }
+
+      return UserController.sendResponse(
+        res,
+        200,
+        true,
+        userData,
+        "Login realizado com sucesso"
       )
-
-      // Configurar o cookie com o token
-      const isProduction = process.env.NODE_ENV === "production"
-      const isDevelopment = process.env.NODE_ENV === "development"
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isDevelopment ? "lax" : "strict",
-        maxAge: 24 * 60 * 60 * 1000,
-        path: "/",
-      })
-
-      // Registrar login no timeline
-      await prisma.userTimeline.create({
-        data: {
-          action: "Login realizado",
-          userId: user.id,
-          editedBy: user.name,
-        },
-      })
-
-      // Resposta SEM o token (agora está no cookie)
-      res.json({
-        success: true,
-        message: "Login realizado com sucesso",
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          address: user.address,
-        },
-      })
     } catch (error) {
+      console.error("Erro no login:", error)
+
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors })
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          error.errors
+        )
       }
-      res.status(500).json({ error: "Erro interno do servidor" })
+
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
-  // get my profile
-  static async getProfile(req: Request, res: Response) {
+  // Logout
+  static async logout(req: Request, res: Response): Promise<Response> {
     try {
-      const user = (req as any).user
+      res.clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+        path: "/",
+      })
 
-      if (!user?.id) {
-        return res.status(401).json({ error: "Usuário não autenticado" })
+      return UserController.sendResponse(
+        res,
+        200,
+        true,
+        undefined,
+        "Logout realizado com sucesso"
+      )
+    } catch (error) {
+      console.error("Erro no logout:", error)
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
+    }
+  }
+
+  // Get my profile
+  static async getProfile(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const userId = req.user?.id
+
+      if (!userId) {
+        return UserController.sendResponse(
+          res,
+          401,
+          false,
+          undefined,
+          undefined,
+          "Usuário não autenticado"
+        )
       }
 
-      const foundUser = await prisma.user.findUnique({
-        where: { id: user.id },
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
         select: {
           id: true,
           name: true,
@@ -168,42 +372,107 @@ export class UserController {
         },
       })
 
-      if (!foundUser) {
-        return res.status(404).json({ error: "Usuário não encontrado" })
+      if (!user) {
+        return UserController.sendResponse(
+          res,
+          404,
+          false,
+          undefined,
+          undefined,
+          "Usuário não encontrado"
+        )
       }
 
-      return res.json(foundUser)
+      return UserController.sendResponse(res, 200, true, user)
     } catch (error) {
-      console.error(error)
-      return res.status(500).json({ error: "Erro interno do servidor" })
+      console.error("Erro ao buscar perfil:", error)
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
   // Gets all users
-  static async getAll(req: Request, res: Response) {
+  static async getAll(req: Request, res: Response): Promise<Response> {
     try {
-      const users = await prisma.user.findMany({
-        select: {
-          id: true,
-          name: true,
-          address: true,
-          email: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: { createdAt: "desc" },
-      })
+      const { page, limit } = timelineQuerySchema.parse(req.query)
+      const skip = (page - 1) * limit
 
-      res.json(users)
+      const [users, total] = await Promise.all([
+        prisma.user.findMany({
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            email: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+        }),
+        prisma.user.count(),
+      ])
+
+      const response: PaginatedResponse<any> = {
+        data: users,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      }
+
+      return UserController.sendResponse(res, 200, true, response)
     } catch (error) {
-      res.status(500).json({ error: "Erro interno do servidor" })
+      console.error("Erro ao buscar usuários:", error)
+
+      if (error instanceof z.ZodError) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          error.errors
+        )
+      }
+
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
   // Gets a user by ID
-  static async getById(req: Request, res: Response) {
+  static async getById(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params
+
+      if (!id) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          "ID é obrigatório"
+        )
+      }
 
       const user = await prisma.user.findUnique({
         where: { id },
@@ -222,120 +491,297 @@ export class UserController {
       })
 
       if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado" })
+        return UserController.sendResponse(
+          res,
+          404,
+          false,
+          undefined,
+          undefined,
+          "Usuário não encontrado"
+        )
       }
 
-      res.json(user)
+      return UserController.sendResponse(res, 200, true, user)
     } catch (error) {
-      res.status(500).json({ error: "Erro interno do servidor" })
+      console.error("Erro ao buscar usuário:", error)
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
   // Updates a user by ID
-  static async update(req: AuthRequest, res: Response) {
+  static async update(req: AuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params
+
+      if (!id) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          "ID é obrigatório"
+        )
+      }
+
       const validatedData = updateUserSchema.parse(req.body)
 
       if (Object.keys(validatedData).length === 0) {
-        return res.status(400).json({ error: "Nenhum campo para atualizar" })
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          "Nenhum campo para atualizar"
+        )
       }
 
-      const user = await prisma.user.findUnique({ where: { id } })
-      if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado" })
+      // Verificar se usuário existe
+      const existingUser = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      })
+
+      if (!existingUser) {
+        return UserController.sendResponse(
+          res,
+          404,
+          false,
+          undefined,
+          undefined,
+          "Usuário não encontrado"
+        )
       }
 
+      // Verificar se email já está em uso por outro usuário
       if (validatedData.email) {
-        const existingUser = await prisma.user.findFirst({
+        const emailInUse = await prisma.user.findFirst({
           where: {
             email: validatedData.email,
             NOT: { id },
           },
         })
-        if (existingUser) {
-          return res.status(400).json({ error: "Email já está em uso" })
+
+        if (emailInUse) {
+          return UserController.sendResponse(
+            res,
+            409,
+            false,
+            undefined,
+            undefined,
+            "Email já está em uso"
+          )
         }
       }
 
-      const updatedUser = await prisma.user.update({
-        where: { id },
-        data: validatedData,
-        select: {
-          id: true,
-          name: true,
-          address: true,
-          email: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+      // Atualizar usuário em transação
+      const result = await prisma.$transaction(async (tx) => {
+        const updatedUser = await tx.user.update({
+          where: { id },
+          data: validatedData,
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            email: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        })
+
+        // Registrar atualização no timeline
+        await tx.userTimeline.create({
+          data: {
+            action: `Dados atualizados: ${Object.keys(validatedData).join(
+              ", "
+            )}`,
+            userId: id,
+            editedBy: req.user?.name || "Sistema",
+          },
+        })
+
+        return updatedUser
       })
 
-      // Registrar atualização no timeline
-      await prisma.userTimeline.create({
-        data: {
-          action: `Dados atualizados: ${Object.keys(validatedData).join(", ")}`,
-          userId: id,
-          editedBy: req.user?.name || "Sistema",
-        },
-      })
-
-      res.json(updatedUser)
+      return UserController.sendResponse(
+        res,
+        200,
+        true,
+        result,
+        "Usuário atualizado com sucesso"
+      )
     } catch (error) {
+      console.error("Erro ao atualizar usuário:", error)
+
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors })
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          error.errors
+        )
       }
-      res.status(500).json({ error: "Erro interno do servidor" })
+
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
   // Deletes a user by ID
-  static async delete(req: AuthRequest, res: Response) {
+  static async delete(req: AuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params
 
-      const user = await prisma.user.findUnique({ where: { id } })
-      if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado" })
+      if (!id) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          "ID é obrigatório"
+        )
       }
 
+      // Verificar se usuário existe
+      const user = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      })
+
+      if (!user) {
+        return UserController.sendResponse(
+          res,
+          404,
+          false,
+          undefined,
+          undefined,
+          "Usuário não encontrado"
+        )
+      }
+
+      // Deletar usuário (timeline será deletado por cascade)
       await prisma.user.delete({ where: { id } })
 
-      res.status(204).send()
+      return UserController.sendResponse(
+        res,
+        200,
+        true,
+        undefined,
+        "Usuário deletado com sucesso"
+      )
     } catch (error) {
-      res.status(500).json({ error: "Erro interno do servidor" })
+      console.error("Erro ao deletar usuário:", error)
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 
-  static async getTimeline(req: Request, res: Response) {
+  // Get user timeline
+  static async getTimeline(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params
-      const page = parseInt(req.query.page as string) || 1
-      const limit = parseInt(req.query.limit as string) || 10
+
+      if (!id) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          "ID é obrigatório"
+        )
+      }
+
+      const { page, limit } = timelineQuerySchema.parse(req.query)
       const skip = (page - 1) * limit
 
-      const timeline = await prisma.userTimeline.findMany({
-        where: { userId: id },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
+      // Verificar se usuário existe
+      const userExists = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true },
       })
 
-      const total = await prisma.userTimeline.count({
-        where: { userId: id },
-      })
+      if (!userExists) {
+        return UserController.sendResponse(
+          res,
+          404,
+          false,
+          undefined,
+          undefined,
+          "Usuário não encontrado"
+        )
+      }
 
-      res.json({
-        timeline,
+      const [timeline, total] = await Promise.all([
+        prisma.userTimeline.findMany({
+          where: { userId: id },
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+        }),
+        prisma.userTimeline.count({
+          where: { userId: id },
+        }),
+      ])
+
+      const response: PaginatedResponse<any> = {
+        data: timeline,
         pagination: {
           page,
           limit,
           total,
           pages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
         },
-      })
+      }
+
+      return UserController.sendResponse(res, 200, true, response)
     } catch (error) {
-      res.status(500).json({ error: "Erro interno do servidor" })
+      console.error("Erro ao buscar timeline:", error)
+
+      if (error instanceof z.ZodError) {
+        return UserController.sendResponse(
+          res,
+          400,
+          false,
+          undefined,
+          undefined,
+          error.errors
+        )
+      }
+
+      return UserController.sendResponse(
+        res,
+        500,
+        false,
+        undefined,
+        undefined,
+        "Erro interno do servidor"
+      )
     }
   }
 }
