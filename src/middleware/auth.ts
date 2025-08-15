@@ -15,8 +15,14 @@ export const authenticateToken = async (
   res: Response,
   next: NextFunction
 ) => {
+  let token
+
   const authHeader = req.headers["authorization"]
-  const token = authHeader && authHeader.split(" ")[1]
+  if (authHeader?.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1]
+  } else if (req.cookies?.token) {
+    token = req.cookies.token
+  }
 
   if (!token) {
     return res.status(401).json({ error: "Token de acesso requerido" })
@@ -26,10 +32,10 @@ export const authenticateToken = async (
     const decoded = jwt.verify(
       token,
       process.env.JWT_SECRET || "fallback-secret"
-    ) as { userId: string }
+    ) as any
 
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId }, // <- agora bate com o payload do login
+      where: { id: decoded.userId },
       select: { id: true, email: true, name: true },
     })
 
